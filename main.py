@@ -748,10 +748,10 @@ def get_user_input():
             if 1 == game_type:
                 game_type = GameType.AttackerVsComp
                 break
-            if 1 == game_type:
+            if 2 == game_type:
                 game_type = GameType.CompVsDefender
                 break
-            if 1 == game_type:
+            if 3 == game_type:
                 game_type = GameType.CompVsComp
                 break
         print("Please enter a valid game type (0, 1, 2, or 3).")
