@@ -1,4 +1,4 @@
-#README for AI Wargame Python Script
+# README for AI Wargame Python Script
 Overview
 This Python script is a strategic game simulator where players engage in a grid-based wargame, either as an Attacker or a Defender. The game features AI components, units with various types and abilities, and implements sophisticated game mechanics like health modification, movement rules, and combat strategies.
 
