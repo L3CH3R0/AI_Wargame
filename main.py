@@ -8,9 +8,6 @@ from time import sleep
 from typing import Tuple, TypeVar, Type, Iterable, ClassVar
 import random
 import requests
-# main_program.py
-
-# Rest of your main program here
 
 
 # maximum and minimum values for our heuristic scores (usually represents an end of game condition)
@@ -80,7 +77,7 @@ class Options:
     max_turns: int | None = 25
     randomize_moves: bool = True
     broker: str | None = None
-    ai_difficulty: int | None = 0
+    heuristic_choice: int | None=0
 
 
 ##############################################################################################################
@@ -289,7 +286,8 @@ class Game:
         timeout = self.options.max_time
         max_turns = self.options.max_turns
         game_type = self.options.game_type
-
+        heuristic_choice = self.options.heuristic_choice
+        
         filename = f'gameTrace-{is_ai}-{timeout}-{max_turns}.txt'
 
         player_one = "Human" if game_type == GameType.AttackerVsDefender else "AI"
@@ -303,7 +301,7 @@ class Game:
         ]
 
         if game_type != GameType.AttackerVsDefender:
-            table_data.append(["Heuristic", "e0 e1 e2"])
+            table_data.append(["Heuristic", f"e{heuristic_choice}"],)
 
         table_str = "\n".join(["\t".join(row) for row in table_data])
 
@@ -460,7 +458,6 @@ class Game:
                 self.remove_dead(coords.src)
             if not dst_unit.is_alive():
                 self.remove_dead(coords.dst)
-            logger.write(f"{self.next_player.name}'s {src_unit.type.name} self-destructing at: {coords.src}!\n")
             return True, "Self-destruct successful"
 
         # Attack
@@ -481,12 +478,8 @@ class Game:
                     self.remove_dead(coords.dst)
 
                 if src_unit.is_alive():
-                    logger.write(
-                        f"{self.next_player.name}'s {src_unit.type.name} at {coords.src} attacking enemy's {dst_unit.type.name} at {coords.dst}.\n")
                     return True, "attack successful"
                 else:
-                    logger.write(
-                        f"{self.next_player.name}'s {src_unit.type.name} at {coords.src} attacking enemy's {dst_unit.type.name} at {coords.dst}. Source unit defeated!\n")
                     return True, "attack successful, source unit defeated"
             else:
                 return False, "Invalid move: Cannot move onto the same position as the target unit after attacking"
@@ -500,8 +493,6 @@ class Game:
                         amount = src_unit.repair_amount(dst_unit)
                         if amount > 0:
                             dst_unit.health += amount
-                            logger.write(
-                                f"{self.next_player.name}'s {src_unit.type.name} at {coords.src} repairing friendly {dst_unit.type.name} at {coords.dst}.\n")
                             return True, f"Repair successful. {dst_unit.type} is healed by {amount} health."
                     else:
                         return False, "Invalid move: The unit is already at full health."
@@ -522,7 +513,7 @@ class Game:
             if src_unit.is_alive():
                 self.set(coords.dst, src_unit)
                 self.set(coords.src, None)
-                logger.write(f"{self.next_player.name}'s move: {coords.src} to {coords.dst}.\n")
+                
                 return True, "Move successful"
             else:
                 return False, "Invalid move: Source unit is defeated."
@@ -683,7 +674,6 @@ class Game:
         return sum(
             weights[unit_type] * (player_counts[Player.Attacker][unit_type] - player_counts[Player.Defender][unit_type])
             for unit_type in unit_types)
-
     def evaluate_state1(self) -> int:
         unit_types = [UnitType.Virus, UnitType.Tech, UnitType.Firewall, UnitType.Program, UnitType.AI]
         player_counts = {player: {unit_type: self.count_units_by_type(player, unit_type) for unit_type in unit_types}
@@ -696,11 +686,9 @@ class Game:
             UnitType.Program: 1,
             UnitType.AI: 9999
         }
-
         return sum(
             weights[unit_type] * (player_counts[Player.Attacker][unit_type] - player_counts[Player.Defender][unit_type])
             for unit_type in unit_types)
-
     def evaluate_state2(self) -> int:
         unit_types = [UnitType.Virus, UnitType.Tech, UnitType.Firewall, UnitType.Program, UnitType.AI]
         player_counts = {player: {unit_type: self.count_units_by_type(player, unit_type) for unit_type in unit_types}
@@ -713,33 +701,77 @@ class Game:
             UnitType.Program: 1,
             UnitType.AI: 12000
         }
-
         return sum(
             weights[unit_type] * (player_counts[Player.Attacker][unit_type] - player_counts[Player.Defender][unit_type])
             for unit_type in unit_types)
 
+    def evaluate_state_advanced(self) -> int:
+        board_health_diff = self.calculate_board_health_diff()
+        ai_health_diff = self.calculate_ai_health_diff()
+        distance_to_opponent_ai = self.calculate_distance_to_opponent_ai()
+
+        return board_health_diff + ai_health_diff + distance_to_opponent_ai
+
+    def calculate_board_health_diff(self) -> int:
+        attacker_health = sum(unit.health for _, unit in self.player_units(Player.Attacker))
+        defender_health = sum(unit.health for _, unit in self.player_units(Player.Defender))
+
+        return defender_health - attacker_health
+
+    def calculate_ai_health_diff(self) -> int:
+        try:
+            attacker_ai_health = next(
+                unit.health for _, unit in self.player_units(Player.Attacker) if unit.type == UnitType.AI)
+        except StopIteration:
+            attacker_ai_health = 0
+
+        try:
+            defender_ai_health = next(
+                unit.health for _, unit in self.player_units(Player.Defender) if unit.type == UnitType.AI)
+        except StopIteration:
+            defender_ai_health = 0
+
+        return defender_ai_health - attacker_ai_health
+
+    def calculate_distance_to_opponent_ai(self) -> int:
+        try:
+            attacker_ai_coord = next(
+                coord for coord, unit in self.player_units(Player.Attacker) if unit.type == UnitType.AI)
+        except StopIteration:
+            return 0
+        try:
+            defender_ai_coord = next(
+            coord for coord, unit in self.player_units(Player.Defender) if unit.type == UnitType.AI)
+        except StopIteration:
+            return 0
+
+        return abs(attacker_ai_coord.row - defender_ai_coord.row) + abs(attacker_ai_coord.col - defender_ai_coord.col)
+
     def minimax_move(self, depth: int, maximizing_player: bool) -> Tuple[int, CoordPair | None, int]:
         if depth == 0 or self.is_finished():
             # Base case: Return the evaluation score, None for move, and depth of 0.
-            if self.options.ai_difficulty == 0:
+            if self.options.heuristic_choice == 0:
                 return int(self.evaluate_state()), None, 0
-            elif self.options.ai_difficulty == 1:
+            elif self.options.heuristic_choice == 1:
                 return int(self.evaluate_state1()), None, 0
-            elif self.options.ai_difficulty == 2:
-                return int(self.evaluate_state2()), None, 0
+            elif self.options.heuristic_choice == 2:
+                return int(self.evaluate_state_advanced()), None, 0
+
+        move_candidates = list(self.move_candidates())
+        best_move = move_candidates[0]
 
         if maximizing_player:
             best_value = float('-inf')
-            best_move = None
             total_depth = 0  # Track total depth for average depth calculation
 
-            move_candidates = list(self.move_candidates())  # Convert generator to list
             for move in move_candidates:
                 new_game = self.clone()
-                success, _ = new_game.perform_move(move)
-                if not success:
-                    continue
+                new_game.perform_move(move)
                 value, _, child_depth = new_game.minimax_move(depth - 1, False)
+                if depth in self.stats.evaluations_per_depth:
+                    self.stats.evaluations_per_depth[depth] += 1
+                else:
+                    self.stats.evaluations_per_depth[depth] = 1
                 if value > best_value:
                     best_value = value
                     best_move = move
@@ -748,48 +780,51 @@ class Game:
             avg_depth = total_depth / len(move_candidates)  # Calculate average depth
             return int(best_value), best_move, int(avg_depth)
         else:
-            best_value = float('inf')
-            best_move = None
+            worst_value = float('inf')
             total_depth = 0  # Track total depth for average depth calculation
 
-            move_candidates = list(self.move_candidates())  # Convert generator to list
             for move in move_candidates:
                 new_game = self.clone()
-                success, _ = new_game.perform_move(move)
-                if not success:
-                    continue
+                new_game.perform_move(move)
                 value, _, child_depth = new_game.minimax_move(depth - 1, True)
-                if value < best_value:
-                    best_value = value
+                if depth in self.stats.evaluations_per_depth:
+                    self.stats.evaluations_per_depth[depth] += 1
+                else:
+                    self.stats.evaluations_per_depth[depth] = 1
+                if value < worst_value:
+                    worst_value = value
                     best_move = move
                 total_depth += 1 + child_depth  # Depth of current node plus child depth
 
             avg_depth = total_depth / len(move_candidates)  # Calculate average depth
-            return int(best_value), best_move, int(avg_depth)
+            return int(worst_value), best_move, int(avg_depth)
 
     def alphabeta(self, depth: int, alpha: int, beta: int, maximizing_player: bool) -> Tuple[
         int, CoordPair | None, int]:
         if depth == 0 or self.is_finished():
             # Base case: Return the evaluation score, None for move, and depth of 0.
-            if self.options.ai_difficulty == 0:
+            if self.options.heuristic_choice == 0:
                 return int(self.evaluate_state()), None, 0
-            elif self.options.ai_difficulty == 1:
+            elif self.options.heuristic_choice == 1:
                 return int(self.evaluate_state1()), None, 0
-            elif self.options.ai_difficulty == 2:
-                return int(self.evaluate_state2()), None, 0
+            elif self.options.heuristic_choice == 2:
+                return int(self.evaluate_state_advanced()), None, 0
+
+        move_candidates = list(self.move_candidates())
+        best_move = move_candidates[0]
+        total_depth = 0  # Track total depth for average depth calculation
 
         if maximizing_player:
             best_value = float('-inf')
-            best_move = None
-            total_depth = 0  # Track total depth for average depth calculation
 
-            move_candidates = list(self.move_candidates())  # Convert generator to list
             for move in move_candidates:
                 new_game = self.clone()
-                success, _ = new_game.perform_move(move)
-                if not success:
-                    continue
+                new_game.perform_move(move)
                 value, _, child_depth = new_game.alphabeta(depth - 1, alpha, beta, False)
+                if depth in self.stats.evaluations_per_depth:
+                    self.stats.evaluations_per_depth[depth] += 1
+                else:
+                    self.stats.evaluations_per_depth[depth] = 1
                 if value > best_value:
                     best_value = value
                     best_move = move
@@ -797,51 +832,67 @@ class Game:
 
                 alpha = max(alpha, best_value)
                 if beta <= alpha:
-                    break  # Beta cut-off
+                    break
 
             avg_depth = total_depth / len(move_candidates)  # Calculate average depth
             return int(best_value), best_move, int(avg_depth)
         else:
-            best_value = float('inf')
-            best_move = None
-            total_depth = 0  # Track total depth for average depth calculation
+            worst_value = float('inf')
 
-            move_candidates = list(self.move_candidates())  # Convert generator to list
             for move in move_candidates:
                 new_game = self.clone()
-                success, _ = new_game.perform_move(move)
-                if not success:
-                    continue
+                new_game.perform_move(move)
                 value, _, child_depth = new_game.alphabeta(depth - 1, alpha, beta, True)
-                if value < best_value:
-                    best_value = value
+                if depth in self.stats.evaluations_per_depth:
+                    self.stats.evaluations_per_depth[depth] += 1
+                else:
+                    self.stats.evaluations_per_depth[depth] = 1
+                if value < worst_value:
+                    worst_value = value
                     best_move = move
                 total_depth += 1 + child_depth  # Depth of current node plus child depth
 
-                beta = min(beta, best_value)
+                beta = min(beta, worst_value)
                 if beta <= alpha:
-                    break  # Alpha cut-off
+                    break
 
             avg_depth = total_depth / len(move_candidates)  # Calculate average depth
-            return int(best_value), best_move, int(avg_depth)
+            return int(worst_value), best_move, int(avg_depth)
 
     def suggest_move(self) -> CoordPair | None:
         """Suggest the next move using the Minimax algorithm with e0 heuristic."""
         start_time = datetime.now()
+        for depth in range(1, self.options.max_depth + 1):
+            self.stats.evaluations_per_depth[depth] = 0
         if self.options.alpha_beta:
-            (score, move, avg_depth) = self.alphabeta(self.options.max_depth, float('-inf'), float('inf'), True)
+            (score, move, avg_depth) = self.alphabeta(self.options.max_depth, float('-inf'), float('inf'), self.next_player == Player.Attacker)
         else:
-            (score, move, avg_depth) = self.minimax_move(self.options.max_depth, True)
+            (score, move, avg_depth) = self.minimax_move(self.options.max_depth, self.next_player == Player.Attacker)
 
         elapsed_seconds = (datetime.now() - start_time).total_seconds()
         self.stats.total_seconds += elapsed_seconds
         print(f"Heuristic score: {score}")
-        print(f"Average recursive depth: {avg_depth:0.1f}")
-        print(f"Evals per depth: ", end='')
-        for k in sorted(self.stats.evaluations_per_depth.keys()):
-            print(f"{k}:{self.stats.evaluations_per_depth[k]} ", end='')
-        print()
+        #print(f"Average recursive depth: {avg_depth:0.1f}")
+
         total_evals = sum(self.stats.evaluations_per_depth.values())
+        print(f"Cumulative evals: {total_evals}")  # Format in millions
+
+        print("Cumulative evals by depth:", end=' ')
+        for k in sorted(self.stats.evaluations_per_depth.keys()):
+            print(f"{k}={self.stats.evaluations_per_depth[k]}", end=', ')
+        print()
+
+        print("Cumulative % evals by depth:", end=' ')
+        for k in sorted(self.stats.evaluations_per_depth.keys()):
+            percentage = (self.stats.evaluations_per_depth[k] / total_evals) * 100
+            print(f"{k}={percentage:.1f}%", end=', ')
+        print()
+
+        # Calculate average branching factor
+        total_nodes = sum(self.stats.evaluations_per_depth.values())
+        total_depths = len(self.stats.evaluations_per_depth)
+        average_branching_factor = total_nodes / total_depths if total_depths > 0 else 0
+        print(f"Average branching factor: {average_branching_factor:.1f}")
         if self.stats.total_seconds > 0:
             print(f"Eval performance: {total_evals / self.stats.total_seconds / 1000:0.1f}k/s")
         print(f"Elapsed time: {elapsed_seconds:0.1f}s")
@@ -899,26 +950,25 @@ class Game:
 
 ##############################################################################################################
 
-def get_ai_difficulty():
+def get_heuristic_choice():
     while True:
-        print("Choose AI difficulty:")
-        print("0. Easy")
-        print("1. Medium")
-        print("2. Hard")
-        ai_difficulty_str = input("Enter the number corresponding to AI difficulty: ")
-        if ai_difficulty_str.isdigit():
-            ai_difficulty = int(ai_difficulty_str)
-            if 0 == ai_difficulty:
-                return ai_difficulty
+        print("There are three choices of heuristics:")
+        print("0. e0")
+        print("1. e1")
+        print("2. e2")
+        heuristic_choice_str = input("Enter heuristic choice between 0 and 2:")
+        if heuristic_choice_str.isdigit():
+            heuristic_choice = int(heuristic_choice_str)
+            if 0 == heuristic_choice:
+                return heuristic_choice
 
-            elif 1 == ai_difficulty:
-                return ai_difficulty
+            elif 1 == heuristic_choice:
+                return heuristic_choice
 
-            elif 2 == ai_difficulty:
-                return ai_difficulty
+            elif 2 == heuristic_choice:
+                return heuristic_choice
 
-        print("Invalid number!!")
-
+        print("Please enter a valid heuristic choice (0, 1, or 2).")
 
 
 def get_user_input():
@@ -935,18 +985,20 @@ def get_user_input():
             game_type = int(game_type_str)
             if 0 == game_type:
                 game_type = GameType.AttackerVsDefender
+                heuristic_choice = None
+                alpha_beta = None
                 break
             if 1 == game_type:
                 game_type = GameType.AttackerVsComp
-                ai_difficulty = get_ai_difficulty()
+                heuristic_choice = get_heuristic_choice()
                 break
             if 2 == game_type:
                 game_type = GameType.CompVsDefender
-                ai_difficulty = get_ai_difficulty()
+                heuristic_choice = get_heuristic_choice()
                 break
             if 3 == game_type:
                 game_type = GameType.CompVsComp
-                ai_difficulty =get_ai_difficulty()
+                heuristic_choice =get_heuristic_choice()
                 break
         print("Please enter a valid game type (0, 1, 2, or 3).")
 
@@ -971,10 +1023,13 @@ def get_user_input():
         print("Please enter a positive float for maximum seconds.")
 
     # Get user input for alpha-beta pruning (True/False)
-    alpha_beta_str = input("Enable alpha-beta pruning (True/False): ").lower()
-    alpha_beta = alpha_beta_str == 'true'
+    if int(game_type_str) >=1:
+        alpha_beta_str = input("Enable alpha-beta pruning (True/False): ").lower()
+        alpha_beta = alpha_beta_str
+        
 
-    return game_type, max_turns, max_seconds, alpha_beta, ai_difficulty
+    return game_type, max_turns, max_seconds, alpha_beta, heuristic_choice
+
 
 
 def main():
@@ -999,7 +1054,7 @@ def main():
         game_type = GameType.CompVsComp
 
         # Get user input for max turns, max seconds, and alpha-beta pruning
-    game_type, max_turns, max_seconds, alpha_beta, ai_difficulty = get_user_input()
+    game_type, max_turns, max_seconds, alpha_beta, heuristic_choice = get_user_input()
 
 
     # Set up game options
@@ -1008,9 +1063,8 @@ def main():
         max_turns=max_turns,
         max_time=max_seconds,
         alpha_beta=alpha_beta,
-        ai_difficulty=ai_difficulty
+        heuristic_choice=heuristic_choice
     )
-
 
     # override class defaults via command line options
     if args.max_depth is not None:
